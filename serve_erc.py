@@ -20,8 +20,7 @@ def main() :
     Pyro4.config.SERIALIZERS_ACCEPTED = {"json","marshal","serpent","pickle"}
     Pyro4.Daemon.serveSimple(
         {
-            robot: "sudoroom.robot.yasnac.inst",
-            erc: "sudoroom.robot.yasnac.lib"
+            robot: "sudoroom.robot.yasnac"
         },
         host = localipaddr,         
         ns = False )

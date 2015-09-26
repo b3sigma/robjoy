@@ -1,11 +1,23 @@
 #!/usr/bin/env python
+import argparse
+import copy
+import sys
+import operator
+import datetime
+
 import pygame
 from pygame.locals import *
+
+import yasnac.remote.erc as erc
+import Pyro4
 
 class LocalJoystick :
     def __init__(self) :
         pygame.init()
         pygame.display.set_caption("Robot Joystick Controller")
+
+        self._messages = []
+        self._messages.append("woo!")
         
         self.InitJoystick()
         
@@ -44,15 +56,42 @@ class LocalJoystick :
     #
     
     def InitRobotState(self) :
-        self._robot = { \
-            0 : { "curr" : 0.0, "min" : -100.0, "max" : 100.0 }, \
-            1 : { "curr" : 0.0, "min" : -100.0, "max" : 100.0 }, \
-            2 : { "curr" : 0.0, "min" : -100.0, "max" : 100.0 }, \
-            3 : { "curr" : 0.0, "min" : -100.0, "max" : 100.0 }, \
-            4 : { "curr" : 0.0, "min" : -100.0, "max" : 100.0 } }
+        # values from experiment so far
+        self._robot_state = { \
+            0 : { "cur" : 0.0, "min" : -1000.0, "max" : 1000.0 }, \
+            1 : { "cur" : 0.0, "min" : -1000.0, "max" : 1000.0 }, \
+            2 : { "cur" : 0.0, "min" : -1000.0, "max" : 1000.0 }, \
+            3 : { "cur" : 0.0, "min" : -1000.0, "max" : 1000.0 }, \
+            4 : { "cur" : 0.0, "min" : -1000.0, "max" : 1000.0 }, \
+            5 : { "cur" : 0.0, "min" : -1000.0, "max" : 1000.0 },
+            }
         
         self._next_robot_tick = pygame.time.get_ticks() # now
-        #todo: connecto, parso,
+       
+        if sys.version_info < (3,0) :
+            input = raw_input
+        uri = input("Enter the uri of the robot: ").strip()
+        Pyro4.config.SERIALIZER = "pickle"
+        Pyro4.config.SERIALIZERS_ACCEPTED = {"json","marshal","serpent","pickle"}
+        self._robot = Pyro4.Proxy(uri)
+
+        result = self._robot.execute_command("RPOS")
+        if not result:
+            self._running = False
+        else :
+            self._messages.append(str(result))
+            for i in range(0, len(self._robot_state)) :
+                if(i >= len(result)) :
+                    break;
+                #
+                self._robot_state[i]["cur"] = float(result[i])
+                if(float(result[i]) < self._robot_state[i]["min"]) :
+                    self._robot_state[i]["min"] = float(result[i])
+                if(float(result[i]) > self._robot_state[i]["max"]) :
+                    self._robot_state[i]["max"] = float(result[i])
+                self._last_robot_state = copy.deepcopy(self._robot_state)
+            #
+        #
     #
     
     def ApplyJoyState(self, deltaTime) :
@@ -60,31 +99,67 @@ class LocalJoystick :
             axis_name = "Axis" + str(i)
             
             binding = self._bindings[axis_name]
-            robot_axis = self._robot[binding["target"]]
+            robot_axis = self._robot_state[binding["target"]]
             
             joy = self._joy_state[axis_name]
-            joy_curr = joy["curr"]
+            joy_curr = joy["cur"]
             if abs(joy_curr) < binding["dead"] :
                 continue
             #
             
             delta = binding["speed"] * deltaTime * joy_curr
-            robot_axis["curr"] = robot_axis["curr"] + delta 
-            if (robot_axis["curr"] > robot_axis["max"]) :
-                robot_axis["curr"] = robot_axis["max"]
+            robot_axis["cur"] = robot_axis["cur"] + delta 
+            if (robot_axis["cur"] > robot_axis["max"]) :
+                robot_axis["cur"] = robot_axis["max"]
             #
-            if (robot_axis["curr"] < robot_axis["min"]) :
-                robot_axis["curr"] = robot_axis["min"]
+            if (robot_axis["cur"] < robot_axis["min"]) :
+                robot_axis["cur"] = robot_axis["min"]
             #
             
             #update the state
-            self._robot[binding["target"]] = robot_axis           
+            self._robot_state[binding["target"]] = robot_axis           
         #
     #
     
     def ApplyRobotState(self) :
-        self._next_robot_tick = pygame.time.get_ticks()
-
+        self._robot_tick_interval = 100
+        if (pygame.time.get_ticks() > self._robot_tick_interval + self._next_robot_tick) :
+            self._next_robot_tick = pygame.time.get_ticks()
+            
+            # can't send a move command if we are already there or it will alarm
+            
+            skip_send = True
+            pos_threshold = 0.01 # need a position delta larger than this, somewhere
+            for i in range(0, len(self._robot_state)) :
+                delta = abs(self._robot_state[i]["cur"] - self._last_robot_state[i]["cur"])
+                if(delta > pos_threshold) :
+                    skip_send = False
+                    break #only need the one
+                #
+            #
+            
+            if skip_send == True :
+                return
+            
+            self._speed = 20.0
+            command = "MOVL 0," + str(self._speed) + ",0," \
+                + str(self._robot_state[0]["cur"]) + "," \
+                + str(self._robot_state[1]["cur"]) + "," \
+                + str(self._robot_state[2]["cur"]) + "," \
+                + str(self._robot_state[3]["cur"]) + "," \
+                + str(self._robot_state[5]["cur"]) + "," \
+                + str(self._robot_state[4]["cur"]) + "," \
+                + "0,0,0,0,0,0,0,0"
+            
+            self._last_robot_state = copy.deepcopy(self._robot_state)
+            
+            self._messages.append(command)
+            
+            self._robot.execute_command(command)
+            #robot.execute_command(("MOVL 0,{speed},0,{pos},"
+            #               "0,0,0,0,0,0,0,0").format(speed=speed_string,
+            #                                         pos=target_string))
+        #
     #
      
     def UpdateJoyState(self) :
@@ -105,13 +180,13 @@ class LocalJoystick :
             return
         #
         
-        self._prev_joy_state = self._joy_state
+        self._prev_joy_state = copy.deepcopy(self._joy_state)
         
         self._joy_state = {}
         for i in range(0, self._joy.get_numaxes()) :
             axis_name = "Axis" + str(i)
             
-            max_min_state = {"max" : 0, "min" : 0, "curr" : 0}
+            max_min_state = {"max" : 0, "min" : 0, "cur" : 0}
             if (axis_name in self._prev_joy_state) :       
                 max_min_state = self._prev_joy_state[axis_name]
             #
@@ -132,19 +207,17 @@ class LocalJoystick :
                 max_min_state["min"] = current_state
             #
              
-            max_min_state["curr"] = current_state
+            max_min_state["cur"] = current_state
             self._joy_state[axis_name] = max_min_state
         #
     #
-            
-           
-            
+
     def DrawText(self, text, leftOffset, topOffset, color) :
         surface = self._font.render(text, True, color, (0,0,0))
         surface.set_colorkey((0,0,0))
         self._screen.blit(surface, (leftOffset, topOffset))
     #
-        
+
     def DrawState(self) :
         self._screen.fill(0)
         
@@ -155,9 +228,9 @@ class LocalJoystick :
             self.DrawText("No joystick?", xOffset, yOffset, (255, 255, 255))
             return
         #
-        
-        for (target,state) in self._robot.iteritems() :
-            text = "RobotIndex(%d) max(%f) min(%f) curr(%f)" % (target, state["max"], state["min"], state["curr"])
+
+        for (target,state) in self._robot_state.iteritems() :
+            text = "RobotIndex(%d) max(%f) min(%f) cur(%f)" % (target, state["max"], state["min"], state["cur"])
             self.DrawText(text, xOffset, yOffset, (255,255,255))
             yOffset += yLine
         
@@ -165,9 +238,18 @@ class LocalJoystick :
         yOffset += yLine
         
         for (name,state) in self._joy_state.iteritems() :
-            text = "Name(%s) max(%f) min(%f) curr(%f)" % (name, state["max"], state["min"], state["curr"])
+            text = "Name(%s) max(%f) min(%f) cur(%f)" % (name, state["max"], state["min"], state["cur"])
             self.DrawText(text, xOffset, yOffset, (255,255,255))
             yOffset += yLine
+        #
+        
+        for msg in self._messages :
+            self.DrawText(msg, xOffset, yOffset, (255,255,255))
+            yOffset += yLine
+        #
+        max_messages = 10
+        if(len(self._messages) > max_messages) :
+            self._messages = self._messages[(len(self._messages) - max_messages):len(self._messages)]
         #
         
         pygame.display.flip()

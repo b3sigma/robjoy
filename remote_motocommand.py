@@ -61,14 +61,18 @@ def main():
 
     #erc.DEBUG = args.debug
 
-    for command in args.command:
-        print "about to " + command + " !"
-        result = robot.execute_command(command)
-        if result:
-            print ",".join(result)
-            if command == 'RSTATS':
-                erc.warn("The result represents these flags: "
-                         + ",".join(erc.decode_rstats(result)), True)
+    command = ""
+    for command_part in args.command:
+        command = command + command_part + " "
+    #
+
+    print "about to " + command + " !"
+    result = robot.execute_command(command.strip())
+    if result:
+        print ",".join(result)
+        if command == 'RSTATS':
+            erc.warn("The result represents these flags: "
+                     + ",".join(erc.decode_rstats(result)), True)
 
 
     return True
