@@ -48,11 +48,11 @@ class LocalJoystick :
         #so it seems like all axis are -1.0 to 1.0 from pygame
 
         self._bindings = { \
-            "Axis0": { "target": 0, "speed" : 0.01, "dead" : 0.1 }, \
-            "Axis1": { "target": 1, "speed" : 0.01, "dead" : 0.1 }, \
+            "Axis0": { "target": 0, "speed" : 0.001, "dead" : 0.1 }, \
+            "Axis1": { "target": 1, "speed" : 0.001, "dead" : 0.1 }, \
 #            "Axis2": { "target": 2, "speed" : 0.01, "dead" : 0.1 }, \
-            "Axis3": { "target": 3, "speed" : 0.01, "dead" : 0.1 }, \
-            "Axis4": { "target": 4, "speed" : 0.01, "dead" : 0.1 }, \
+            "Axis3": { "target": 3, "speed" : 0.001, "dead" : 0.1 }, \
+            "Axis4": { "target": 4, "speed" : 0.001, "dead" : 0.1 }, \
             "Button4": { "target": 5, "speed": -0.01, "dead" : 0.5 }, \
             "Button5": { "target": 5, "speed": 0.01, "dead" : 0.5 }, \
             }
@@ -103,6 +103,7 @@ class LocalJoystick :
         self._robot_commands = []
 
         self._speed = speed
+        self._messages.append("speed was " + str(self._speed))
 
         self._next_robot_tick = pygame.time.get_ticks() # now
 
