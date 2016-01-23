@@ -50,12 +50,43 @@ class LocalJoystick :
         self._bindings = { \
             "Axis0": { "target": 0, "speed" : 0.01, "dead" : 0.1 }, \
             "Axis1": { "target": 1, "speed" : 0.01, "dead" : 0.1 }, \
-            "Axis2": { "target": 2, "speed" : 0.01, "dead" : 0.1 }, \
+#            "Axis2": { "target": 2, "speed" : 0.01, "dead" : 0.1 }, \
             "Axis3": { "target": 3, "speed" : 0.01, "dead" : 0.1 }, \
             "Axis4": { "target": 4, "speed" : 0.01, "dead" : 0.1 }, \
             "Button4": { "target": 5, "speed": -0.01, "dead" : 0.5 }, \
             "Button5": { "target": 5, "speed": 0.01, "dead" : 0.5 }, \
             }
+        self._cmd_bindings = { \
+            "Button6": { "remote": True, "cmd_cursor": 1, "cmds": [ "SVON 0", "SVON 1" ], }, \
+            "Button7": { "remote": False, "cmd_cursor": 0, "cmds": [ "RPOSReset"], }, \
+            }
+        
+    #
+
+    def ExecuteLocalBinding(self, command) :
+        if command == "RPOSReset" :
+            self.DoRPOSReset()
+        #
+    #       
+
+    def DoRPOSReset(self) :
+        result = self._robot.execute_command("RPOS")
+        if not result:
+            self._running = False
+        else :
+            self._messages.append(str(result))
+            for i in range(0, len(self._robot_state)) :
+                if(i >= len(result)) :
+                    break;
+                #
+                self._robot_state[i]["cur"] = float(result[i])
+                if(float(result[i]) < self._robot_state[i]["min"]) :
+                    self._robot_state[i]["min"] = float(result[i])
+                if(float(result[i]) > self._robot_state[i]["max"]) :
+                    self._robot_state[i]["max"] = float(result[i])
+                self._last_robot_state = copy.deepcopy(self._robot_state)
+            #
+        #
     #
 
     def InitRobotState(self, remote, speed) :
@@ -68,6 +99,8 @@ class LocalJoystick :
             4 : { "cur" : 0.0, "min" : -1000.0, "max" : 1000.0 }, \
             5 : { "cur" : 0.0, "min" : -1000.0, "max" : 1000.0 },
             }
+
+        self._robot_commands = []
 
         self._speed = speed
 
@@ -91,24 +124,10 @@ class LocalJoystick :
             self._robot = Pyro4.Proxy(uri)
         #
 
-        result = self._robot.execute_command("RPOS")
-        if not result:
-            self._running = False
-        else :
-            self._messages.append(str(result))
-            for i in range(0, len(self._robot_state)) :
-                if(i >= len(result)) :
-                    break;
-                #
-                self._robot_state[i]["cur"] = float(result[i])
-                if(float(result[i]) < self._robot_state[i]["min"]) :
-                    self._robot_state[i]["min"] = float(result[i])
-                if(float(result[i]) > self._robot_state[i]["max"]) :
-                    self._robot_state[i]["max"] = float(result[i])
-                self._last_robot_state = copy.deepcopy(self._robot_state)
-            #
-        #
+        self.DoRPOSReset()
     #
+
+    
 
     def ApplyJoyState(self, deltaTime) :
         for (name, binding) in self._bindings.iteritems() :
@@ -132,9 +151,41 @@ class LocalJoystick :
             #update the state
             self._robot_state[binding["target"]] = robot_axis
         #
+
+        for (name, binding) in self._cmd_bindings.iteritems() :
+            joy = self._joy_state[name]
+            joy_cur = joy["cur"]
+
+            if joy_cur > 0 :
+                last_cur = None
+                if name in self._prev_joy_state :
+                    last_joy = self._prev_joy_state[name]
+                    last_cur = last_joy["cur"]
+                #
+
+                if joy_cur != last_cur :
+                    if len(binding["cmds"]) > 0 :
+                        if binding["remote"] == True :
+                            self._robot_commands.append(binding["cmds"][binding["cmd_cursor"]])
+                        else :
+                            self.ExecuteLocalBinding(binding["cmds"][binding["cmd_cursor"]])
+                        #
+                        binding["cmd_cursor"] = (binding["cmd_cursor"] + 1) % len(binding["cmds"])
+                    #
+                #
+            #
+        #
     #
 
     def ApplyRobotState(self) :
+
+        #send commands immediately, don't wait on the tick
+        for cmd in self._robot_commands :
+            result = self._robot.execute_command(cmd)
+            self._messages.append("executed '" + str(cmd) + "' for result " + str(result))
+        #
+        self._robot_commands = []
+
         self._robot_tick_interval = 100
         if (pygame.time.get_ticks() > self._robot_tick_interval + self._next_robot_tick) :
             self._next_robot_tick = pygame.time.get_ticks()
@@ -312,7 +363,7 @@ def main() :
     argp = argparse.ArgumentParser(formatter_class=formatter, description=(
         "Uses a joystick to send commands to the YASNAC robot\n"))
     argp.add_argument('-r', '--remote', nargs='?', const='')
-    argp.add_argument('-s', '--speed', default='10')
+    argp.add_argument('-s', '--speed', default='0.5')
     args = argp.parse_args()
 
     robotJoystick = LocalJoystick(remote=args.remote, speed=args.speed)
