@@ -12,7 +12,7 @@ import yasnac.remote.erc as erc
 import Pyro4
 
 class LocalJoystick :
-    def __init__(self) :
+    def __init__(self, **args) :
         pygame.init()
         pygame.display.set_caption("Robot Joystick Controller")
 
@@ -25,7 +25,7 @@ class LocalJoystick :
             return
         #
 
-        self.InitRobotState()
+        self.InitRobotState(args['remote'], args['speed'])
 
         self._screen = pygame.display.set_mode((1000,800))
         self._font = pygame.font.SysFont("Courier", 20)
@@ -58,7 +58,7 @@ class LocalJoystick :
             }
     #
 
-    def InitRobotState(self) :
+    def InitRobotState(self, remote, speed) :
         # values from experiment so far
         self._robot_state = { \
             0 : { "cur" : 0.0, "min" : -1000.0, "max" : 1000.0 }, \
@@ -69,14 +69,27 @@ class LocalJoystick :
             5 : { "cur" : 0.0, "min" : -1000.0, "max" : 1000.0 },
             }
 
+        self._speed = speed
+
         self._next_robot_tick = pygame.time.get_ticks() # now
 
         if sys.version_info < (3,0) :
             input = raw_input
-        uri = input("Enter the uri of the robot: ").strip()
-        Pyro4.config.SERIALIZER = "pickle"
-        Pyro4.config.SERIALIZERS_ACCEPTED = {"json","marshal","serpent","pickle"}
-        self._robot = Pyro4.Proxy(uri)
+        #
+
+        if remote == None :
+            # do local
+            self._robot = erc.ERC()
+        else :
+            Pyro4.config.SERIALIZER = "pickle"
+            Pyro4.config.SERIALIZERS_ACCEPTED = {"json","marshal","serpent","pickle"}
+
+            uri = remote
+            if len(uri) <= 1 :
+                uri = input("Enter the uri of the robot: ").strip()
+            #
+            self._robot = Pyro4.Proxy(uri)
+        #
 
         result = self._robot.execute_command("RPOS")
         if not result:
@@ -144,7 +157,7 @@ class LocalJoystick :
             
             self._move_type = "MOVL" # "MOVJ" # "MOVL" 
 
-            self._speed = 20.0
+            #self._speed = 20.0
             command = self._move_type \
                 + " 0," + str(self._speed) + ",0," \
                 + str(self._robot_state[0]["cur"]) + "," \
@@ -248,7 +261,8 @@ class LocalJoystick :
             text = "RobotIndex(%d) max(%f) min(%f) cur(%f)" % (target, state["max"], state["min"], state["cur"])
             self.DrawText(text, xOffset, yOffset, (255,255,255))
             yOffset += yLine
-
+        #
+        
         self.DrawText("Axes (%d)" % len(self._joy_state), xOffset, yOffset, (255, 255, 255))
         yOffset += yLine
         
@@ -271,7 +285,7 @@ class LocalJoystick :
     #
 
 
-    def main(self) :
+    def MainLoop(self) :
         self._last_tick = pygame.time.get_ticks()
         while (self._running == True) :
             self._delta_time = self._last_tick - pygame.time.get_ticks()
@@ -291,6 +305,18 @@ class LocalJoystick :
         pygame.display.quit()
         self._running = False
     #
+#
 
-robotJoystick = LocalJoystick()
-robotJoystick.main()
+def main() :
+    formatter = argparse.RawDescriptionHelpFormatter
+    argp = argparse.ArgumentParser(formatter_class=formatter, description=(
+        "Uses a joystick to send commands to the YASNAC robot\n"))
+    argp.add_argument('-r', '--remote', nargs='?', const='')
+    argp.add_argument('-s', '--speed', default='10')
+    args = argp.parse_args()
+
+    robotJoystick = LocalJoystick(remote=args.remote, speed=args.speed)
+    robotJoystick.MainLoop()
+#
+
+main()
