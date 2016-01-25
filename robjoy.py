@@ -12,7 +12,7 @@ import yasnac.remote.erc as erc
 import Pyro4
 
 class LocalJoystick :
-    def __init__(self) :
+    def __init__(self, **args) :
         pygame.init()
         pygame.display.set_caption("Robot Joystick Controller")
 
@@ -25,7 +25,7 @@ class LocalJoystick :
             return
         #
 
-        self.InitRobotState()
+        self.InitRobotState(args['remote'], args['speed'])
 
         self._screen = pygame.display.set_mode((1000,800))
         self._font = pygame.font.SysFont("Courier", 20)
@@ -48,36 +48,28 @@ class LocalJoystick :
         #so it seems like all axis are -1.0 to 1.0 from pygame
 
         self._bindings = { \
-            "Axis0": { "target": 0, "speed" : 0.01, "dead" : 0.1 }, \
-            "Axis1": { "target": 1, "speed" : 0.01, "dead" : 0.1 }, \
-            "Axis2": { "target": 2, "speed" : 0.01, "dead" : 0.1 }, \
-            "Axis3": { "target": 3, "speed" : 0.01, "dead" : 0.1 }, \
-            "Axis4": { "target": 4, "speed" : 0.01, "dead" : 0.1 }, \
+            "Axis0": { "target": 0, "speed" : 0.001, "dead" : 0.1 }, \
+            "Axis1": { "target": 1, "speed" : 0.001, "dead" : 0.1 }, \
+#            "Axis2": { "target": 2, "speed" : 0.01, "dead" : 0.1 }, \
+            "Axis3": { "target": 3, "speed" : 0.001, "dead" : 0.1 }, \
+            "Axis4": { "target": 4, "speed" : 0.001, "dead" : 0.1 }, \
             "Button4": { "target": 5, "speed": -0.01, "dead" : 0.5 }, \
             "Button5": { "target": 5, "speed": 0.01, "dead" : 0.5 }, \
             }
+        self._cmd_bindings = { \
+            "Button6": { "remote": True, "cmd_cursor": 1, "cmds": [ "SVON 0", "SVON 1" ], }, \
+            "Button7": { "remote": False, "cmd_cursor": 0, "cmds": [ "RPOSReset"], }, \
+            }
+        
     #
 
-    def InitRobotState(self) :
-        # values from experiment so far
-        self._robot_state = { \
-            0 : { "cur" : 0.0, "min" : -1000.0, "max" : 1000.0 }, \
-            1 : { "cur" : 0.0, "min" : -1000.0, "max" : 1000.0 }, \
-            2 : { "cur" : 0.0, "min" : -1000.0, "max" : 1000.0 }, \
-            3 : { "cur" : 0.0, "min" : -1000.0, "max" : 1000.0 }, \
-            4 : { "cur" : 0.0, "min" : -1000.0, "max" : 1000.0 }, \
-            5 : { "cur" : 0.0, "min" : -1000.0, "max" : 1000.0 },
-            }
+    def ExecuteLocalBinding(self, command) :
+        if command == "RPOSReset" :
+            self.DoRPOSReset()
+        #
+    #       
 
-        self._next_robot_tick = pygame.time.get_ticks() # now
-
-        if sys.version_info < (3,0) :
-            input = raw_input
-        uri = input("Enter the uri of the robot: ").strip()
-        Pyro4.config.SERIALIZER = "pickle"
-        Pyro4.config.SERIALIZERS_ACCEPTED = {"json","marshal","serpent","pickle"}
-        self._robot = Pyro4.Proxy(uri)
-
+    def DoRPOSReset(self) :
         result = self._robot.execute_command("RPOS")
         if not result:
             self._running = False
@@ -96,6 +88,47 @@ class LocalJoystick :
             #
         #
     #
+
+    def InitRobotState(self, remote, speed) :
+        # values from experiment so far
+        self._robot_state = { \
+            0 : { "cur" : 0.0, "min" : -1000.0, "max" : 1000.0 }, \
+            1 : { "cur" : 0.0, "min" : -1000.0, "max" : 1000.0 }, \
+            2 : { "cur" : 0.0, "min" : -1000.0, "max" : 1000.0 }, \
+            3 : { "cur" : 0.0, "min" : -1000.0, "max" : 1000.0 }, \
+            4 : { "cur" : 0.0, "min" : -1000.0, "max" : 1000.0 }, \
+            5 : { "cur" : 0.0, "min" : -1000.0, "max" : 1000.0 },
+            }
+
+        self._robot_commands = []
+
+        self._speed = speed
+        self._messages.append("speed was " + str(self._speed))
+
+        self._next_robot_tick = pygame.time.get_ticks() # now
+
+        if sys.version_info < (3,0) :
+            input = raw_input
+        #
+
+        if remote == None :
+            # do local
+            self._robot = erc.ERC()
+        else :
+            Pyro4.config.SERIALIZER = "pickle"
+            Pyro4.config.SERIALIZERS_ACCEPTED = {"json","marshal","serpent","pickle"}
+
+            uri = remote
+            if len(uri) <= 1 :
+                uri = input("Enter the uri of the robot: ").strip()
+            #
+            self._robot = Pyro4.Proxy(uri)
+        #
+
+        self.DoRPOSReset()
+    #
+
+    
 
     def ApplyJoyState(self, deltaTime) :
         for (name, binding) in self._bindings.iteritems() :
@@ -119,9 +152,41 @@ class LocalJoystick :
             #update the state
             self._robot_state[binding["target"]] = robot_axis
         #
+
+        for (name, binding) in self._cmd_bindings.iteritems() :
+            joy = self._joy_state[name]
+            joy_cur = joy["cur"]
+
+            if joy_cur > 0 :
+                last_cur = None
+                if name in self._prev_joy_state :
+                    last_joy = self._prev_joy_state[name]
+                    last_cur = last_joy["cur"]
+                #
+
+                if joy_cur != last_cur :
+                    if len(binding["cmds"]) > 0 :
+                        if binding["remote"] == True :
+                            self._robot_commands.append(binding["cmds"][binding["cmd_cursor"]])
+                        else :
+                            self.ExecuteLocalBinding(binding["cmds"][binding["cmd_cursor"]])
+                        #
+                        binding["cmd_cursor"] = (binding["cmd_cursor"] + 1) % len(binding["cmds"])
+                    #
+                #
+            #
+        #
     #
 
     def ApplyRobotState(self) :
+
+        #send commands immediately, don't wait on the tick
+        for cmd in self._robot_commands :
+            result = self._robot.execute_command(cmd)
+            self._messages.append("executed '" + str(cmd) + "' for result " + str(result))
+        #
+        self._robot_commands = []
+
         self._robot_tick_interval = 100
         if (pygame.time.get_ticks() > self._robot_tick_interval + self._next_robot_tick) :
             self._next_robot_tick = pygame.time.get_ticks()
@@ -144,7 +209,7 @@ class LocalJoystick :
             
             self._move_type = "MOVL" # "MOVJ" # "MOVL" 
 
-            self._speed = 20.0
+            #self._speed = 20.0
             command = self._move_type \
                 + " 0," + str(self._speed) + ",0," \
                 + str(self._robot_state[0]["cur"]) + "," \
@@ -248,7 +313,8 @@ class LocalJoystick :
             text = "RobotIndex(%d) max(%f) min(%f) cur(%f)" % (target, state["max"], state["min"], state["cur"])
             self.DrawText(text, xOffset, yOffset, (255,255,255))
             yOffset += yLine
-
+        #
+        
         self.DrawText("Axes (%d)" % len(self._joy_state), xOffset, yOffset, (255, 255, 255))
         yOffset += yLine
         
@@ -271,7 +337,7 @@ class LocalJoystick :
     #
 
 
-    def main(self) :
+    def MainLoop(self) :
         self._last_tick = pygame.time.get_ticks()
         while (self._running == True) :
             self._delta_time = self._last_tick - pygame.time.get_ticks()
@@ -291,6 +357,18 @@ class LocalJoystick :
         pygame.display.quit()
         self._running = False
     #
+#
 
-robotJoystick = LocalJoystick()
-robotJoystick.main()
+def main() :
+    formatter = argparse.RawDescriptionHelpFormatter
+    argp = argparse.ArgumentParser(formatter_class=formatter, description=(
+        "Uses a joystick to send commands to the YASNAC robot\n"))
+    argp.add_argument('-r', '--remote', nargs='?', const='')
+    argp.add_argument('-s', '--speed', default='0.5')
+    args = argp.parse_args()
+
+    robotJoystick = LocalJoystick(remote=args.remote, speed=args.speed)
+    robotJoystick.MainLoop()
+#
+
+main()
